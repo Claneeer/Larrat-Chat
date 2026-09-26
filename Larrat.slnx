@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Larrat.Core/Larrat.Core.csproj" />
+    <Project Path="src/Larrat.Web/Larrat.Web.csproj" />
+  </Folder>
+</Solution>

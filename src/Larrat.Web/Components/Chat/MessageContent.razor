@@ -1,0 +1,115 @@
+@using Larrat.Core.Entities
+
+@* Componente reutilizável que renderiza o conteúdo de uma mensagem
+   dependendo do tipo (texto, imagem, áudio, arquivo, vídeo) *@
+
+@if (Message.IsDeleted)
+{
+    <div class="message-bubble deleted">🚫 Esta mensagem foi apagada.</div>
+}
+else if (Message.Type == MessageType.Text)
+{
+    <div class="message-bubble">@DecryptedText</div>
+}
+else if (Message.Type == MessageType.Audio && Message.Attachment != null)
+{
+    <div class="attachment-card">
+        <div class="audio-player">
+            <span style="font-size:20px;">🎵</span>
+            <audio controls preload="metadata" style="flex:1;height:32px;">
+                <source src="/api/files/@Message.Attachment.Id/preview" type="@Message.Attachment.ContentType" />
+            </audio>
+            <span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">
+                @FormatDuration(Message.Attachment.AudioDurationSeconds)
+            </span>
+        </div>
+    </div>
+}
+else if (Message.Type == MessageType.Image && Message.Attachment != null)
+{
+    <div class="attachment-card">
+        <img class="attachment-image"
+             src="/api/files/@Message.Attachment.Id/preview"
+             alt="@Message.Attachment.OriginalFileName"
+             loading="lazy" />
+        @if (!string.IsNullOrEmpty(DecryptedText))
+        {
+            <div class="message-bubble" style="padding:8px 12px;">@DecryptedText</div>
+        }
+    </div>
+}
+else if (Message.Type == MessageType.Video && Message.Attachment != null)
+{
+    <div class="attachment-card">
+        <video controls style="max-width:400px;max-height:300px;border-radius:var(--radius-md);" preload="metadata">
+            <source src="/api/files/@Message.Attachment.Id/preview" type="@Message.Attachment.ContentType" />
+        </video>
+    </div>
+}
+else if (Message.Attachment != null)
+{
+    <div class="attachment-card">
+        <div class="attachment-file">
+            <span class="attachment-file__icon">@GetFileIcon(Message.Attachment.ContentType)</span>
+            <div class="attachment-file__info">
+                <div class="attachment-file__name">@Message.Attachment.OriginalFileName</div>
+                <div class="attachment-file__size">@FormatSize(Message.Attachment.FileSizeBytes)</div>
+            </div>
+            <a href="/api/files/@Message.Attachment.Id/download"
+               class="btn btn-secondary btn-sm"
+               download="@Message.Attachment.OriginalFileName">
+                ⬇ Baixar
+            </a>
+        </div>
+        @if (!string.IsNullOrEmpty(DecryptedText))
+        {
+            <div class="message-bubble" style="padding:8px 12px;">@DecryptedText</div>
+        }
+    </div>
+}
+
+<!-- Reações -->
+@if (Message.Reactions.Any())
+{
+    <div class="message-reactions">
+        @foreach (var reactionGroup in Message.Reactions.GroupBy(r => r.Emoji))
+        {
+            <div class="reaction-pill" title="@string.Join(", ", reactionGroup.Select(r => r.User?.DisplayName))">
+                @reactionGroup.Key
+                <span style="font-weight:600">@reactionGroup.Count()</span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Message Message { get; set; } = null!;
+    [Parameter] public string? DecryptedText { get; set; }
+
+    private string GetFileIcon(string contentType) => contentType switch
+    {
+        var ct when ct.StartsWith("image/") => "🖼️",
+        var ct when ct.StartsWith("audio/") => "🎵",
+        var ct when ct.StartsWith("video/") => "🎬",
+        "application/pdf" => "📄",
+        var ct when ct.Contains("zip") || ct.Contains("rar") => "🗜️",
+        var ct when ct.Contains("word") => "📝",
+        var ct when ct.Contains("excel") || ct.Contains("spreadsheet") => "📊",
+        _ => "📁"
+    };
+
+    private string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024:F1} MB";
+        return $"{bytes / 1024.0 / 1024 / 1024:F2} GB";
+    }
+
+    private string FormatDuration(double? seconds)
+    {
+        if (!seconds.HasValue) return "";
+        var s = (int)seconds.Value;
+        return $"{s / 60}:{s % 60:D2}";
+    }
+}

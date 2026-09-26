@@ -1,0 +1,129 @@
+## .NET / ASP.NET Core
+*.swp
+*.*~
+project.lock.json
+.DS_Store
+*.pyc
+nupkg/
+
+# Visual Studio artifacts
+.vs/
+*.user
+*.suo
+*.sdf
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.idea/
+
+# Build outputs
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+build/
+bld/
+_PublishedWebsites/
+**/obj/
+**/bin/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+# Test outputs
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.log
+*.svclog
+*.VC.opendb
+TestResult.xml
+*.testlog
+
+# Publish
+**/publish/
+**/[Pp]ublished*/
+[Rr]el/
+ClientBin/
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# Rider
+.idea/
+*.sln.iml
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Node (caso use npm)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ──────────────────────────────────────────────────────
+# ⚠️  SEGURANÇA — Arquivos que NUNCA devem ir para o git
+# ──────────────────────────────────────────────────────
+
+# Secrets / configurações com senhas
+appsettings.Production.json
+appsettings.Local.json
+appsettings.json
+**/secrets.json
+
+# Uploads de usuários (podem conter dados pessoais)
+**/uploads/
+
+# Certificados
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+*.crt
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# ──────────────────────────────────────────────────────
+# Arquivos de desenvolvimento
+# ──────────────────────────────────────────────────────
+*.tmp
+*.temp
+launchSettings.json
+
+# Coverage
+coverage/
+*.coverage
+*.coveragexml
+coverage.json
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json

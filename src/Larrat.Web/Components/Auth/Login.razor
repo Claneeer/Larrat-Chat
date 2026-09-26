@@ -1,0 +1,121 @@
+@page "/login"
+@using Larrat.Core.Entities
+@using Larrat.Core.Services
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject ITokenService TokenService
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Entrar — Larrat</PageTitle>
+
+<div class="auth-page">
+    <div class="auth-bg-effect"></div>
+
+    <div class="auth-card">
+        <!-- Logo -->
+        <div class="auth-logo">
+            <div class="auth-logo__mark">L</div>
+            <div class="auth-logo__text">Larrat<span>.</span></div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="toast" style="margin-bottom:16px;position:relative;top:auto;right:auto;animation:none;">
+                <span>⚠️</span>
+                <span>@_errorMessage</span>
+            </div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="HandleLogin" FormName="login">
+            <DataAnnotationsValidator />
+
+            <div class="form-group">
+                <label class="form-label" for="login-email">E-mail</label>
+                <InputText id="login-email" class="form-input" @bind-Value="_model.Email"
+                           placeholder="seu@email.com" type="email" autocomplete="email" />
+                <ValidationMessage For="() => _model.Email" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="login-password">Senha</label>
+                <InputText id="login-password" class="form-input" @bind-Value="_model.Password"
+                           placeholder="••••••••" type="password" autocomplete="current-password" />
+                <ValidationMessage For="() => _model.Password" />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top:8px" disabled="@_isLoading">
+                @if (_isLoading)
+                {
+                    <span>Entrando...</span>
+                }
+                else
+                {
+                    <span>Entrar</span>
+                }
+            </button>
+        </EditForm>
+
+        <div style="text-align:center;margin-top:24px;color:var(--text-muted);font-size:14px;">
+            Não tem conta?
+            <a href="/register" style="color:var(--yellow-500);font-weight:600;text-decoration:none;">
+                Criar conta
+            </a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginModel _model = new();
+    private string? _errorMessage;
+    private bool _isLoading;
+
+    private async Task HandleLogin()
+    {
+        _isLoading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var user = await UserManager.FindByEmailAsync(_model.Email);
+            if (user == null)
+            {
+                _errorMessage = "E-mail ou senha incorretos.";
+                return;
+            }
+
+            var result = await SignInManager.CheckPasswordSignInAsync(user, _model.Password, lockoutOnFailure: false);
+            if (!result.Succeeded)
+            {
+                _errorMessage = "E-mail ou senha incorretos.";
+                return;
+            }
+
+            var roles = await UserManager.GetRolesAsync(user);
+            var token = TokenService.GenerateAccessToken(user, roles);
+            var refreshToken = TokenService.GenerateRefreshToken();
+
+            // Armazena tokens no localStorage via JS
+            await JS.InvokeVoidAsync("localStorage.setItem", "larrat_token", token);
+            await JS.InvokeVoidAsync("localStorage.setItem", "larrat_refresh", refreshToken);
+
+            Nav.NavigateTo("/", forceLoad: true);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private class LoginModel
+    {
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "E-mail é obrigatório.")]
+        [System.ComponentModel.DataAnnotations.EmailAddress(ErrorMessage = "E-mail inválido.")]
+        public string Email { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Senha é obrigatória.")]
+        public string Password { get; set; } = string.Empty;
+    }
+}

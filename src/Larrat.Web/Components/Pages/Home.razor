@@ -1,0 +1,750 @@
+@page "/"
+@page "/channels/{GroupId:guid}/{ChannelId:guid}"
+@using Larrat.Core.Entities
+@using Larrat.Core.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IGroupService GroupService
+@inject IMessageService MessageService
+@inject IEncryptionService EncryptionService
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthProvider
+@rendermode InteractiveServer
+
+<PageTitle>Larrat Chat</PageTitle>
+
+<div class="app-shell">
+    <!-- Sidebar de Grupos -->
+    <nav class="sidebar-groups" id="sidebar-groups">
+        <!-- DMs (ícone de casa) -->
+        <a href="/" class="sidebar-avatar @(GroupId == null ? "active" : "")"
+           data-tooltip="Mensagens Diretas">
+            🏠
+        </a>
+
+        <div class="sidebar-divider"></div>
+
+        <!-- Lista de Grupos -->
+        @foreach (var group in _userGroups)
+        {
+            <a href="/channels/@group.Id/@(group.Channels.FirstOrDefault()?.Id)"
+               class="sidebar-avatar @(GroupId == group.Id ? "active" : "")"
+               data-tooltip="@group.Name">
+                @if (!string.IsNullOrEmpty(group.AvatarUrl))
+                {
+                    <img src="@group.AvatarUrl" alt="@group.Name" />
+                }
+                else
+                {
+                    @group.Name.Substring(0, Math.Min(2, group.Name.Length)).ToUpper()
+                }
+            </a>
+        }
+
+        <div class="sidebar-divider"></div>
+
+        <!-- Criar Grupo -->
+        <button class="sidebar-add-btn" @onclick="ShowCreateGroup" data-tooltip="Criar Grupo" id="btn-create-group">
+            +
+        </button>
+    </nav>
+
+    <!-- Painel de Canais -->
+    @if (_currentGroup != null)
+    {
+        <aside class="channels-panel">
+            <div class="channels-panel__header">
+                <span class="channels-panel__group-name">@_currentGroup.Name</span>
+                <button class="btn btn-ghost btn-icon" @onclick="ShowGroupSettings" id="btn-group-settings">⚙️</button>
+            </div>
+
+            <div class="channels-panel__body">
+                <!-- Canais de Texto -->
+                <div class="channels-section">
+                    <div class="channels-section__label">
+                        <span>Canais de Texto</span>
+                        @if (_isGroupAdmin)
+                        {
+                            <button class="btn btn-ghost btn-icon btn-sm" @onclick="ShowAddChannel" id="btn-add-channel">+</button>
+                        }
+                    </div>
+
+                    @foreach (var channel in _currentGroup.Channels.OrderBy(c => c.Position))
+                    {
+                        <a href="/channels/@GroupId/@channel.Id"
+                           class="channel-item @(ChannelId == channel.Id ? "active" : "")"
+                           id="channel-@channel.Id">
+                            <span class="channel-item__icon">#</span>
+                            <span>@channel.Name</span>
+                            @if (_unreadCounts.TryGetValue(channel.Id, out int count) && count > 0)
+                            {
+                                <span class="badge-unread" style="margin-left:auto">@count</span>
+                            }
+                        </a>
+                    }
+                </div>
+
+                <!-- Salas de Voz -->
+                <div class="channels-section">
+                    <div class="channels-section__label">
+                        <span>Salas de Voz</span>
+                        @if (_isGroupAdmin)
+                        {
+                            <button class="btn btn-ghost btn-icon btn-sm" @onclick="ShowAddVoiceRoom" id="btn-add-voice">+</button>
+                        }
+                    </div>
+
+                    @foreach (var room in _currentGroup.VoiceRooms.OrderBy(v => v.Position))
+                    {
+                        <div class="voice-room-item @(_activeVoiceRoomId == room.Id ? "active" : "")" id="voice-room-@room.Id">
+                            <div class="voice-room-item__header" @onclick="() => JoinVoiceRoom(room.Id)">
+                                <span>🔊</span>
+                                <span>@room.Name</span>
+                            </div>
+                            @if (room.Participants.Any())
+                            {
+                                <div class="voice-room-participants">
+                                    @foreach (var p in room.Participants)
+                                    {
+                                        <div class="voice-participant @(_speakingUsers.Contains(p.UserId) ? "speaking" : "")">
+                                            <div class="voice-participant__avatar">
+                                                @(p.User?.DisplayName?.Substring(0, 1).ToUpper() ?? "?")
+                                            </div>
+                                            <span>@p.User?.DisplayName</span>
+                                            @if (p.IsMuted) { <span>🔇</span> }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Painel de usuário logado -->
+            <div style="padding:10px;border-top:1px solid var(--border-subtle);display:flex;align-items:center;gap:8px;background:var(--black-900);">
+                <div class="member-avatar" style="width:36px;height:36px;font-size:14px;">
+                    @(_currentUserInitial)
+                </div>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@_currentUserName</div>
+                    <div style="font-size:11px;color:var(--online);">● Online</div>
+                </div>
+                <button class="btn btn-ghost btn-icon btn-sm" @onclick="Logout" id="btn-logout" data-tooltip="Sair">🚪</button>
+            </div>
+        </aside>
+    }
+    else
+    {
+        <!-- DMs ou tela inicial -->
+        <aside class="channels-panel">
+            <div class="channels-panel__header">
+                <span class="channels-panel__group-name">Mensagens Diretas</span>
+            </div>
+            <div class="channels-panel__body" style="padding:16px;color:var(--text-muted);font-size:14px;">
+                Selecione um grupo ou inicie uma conversa direta.
+            </div>
+        </aside>
+    }
+
+    <!-- Área Principal de Chat -->
+    <main class="chat-main">
+        @if (_currentChannel != null)
+        {
+            <!-- Header do Canal -->
+            <div class="chat-header">
+                <span style="font-size:18px;opacity:0.7">#</span>
+                <div class="chat-header__channel-name">@_currentChannel.Name</div>
+                @if (!string.IsNullOrEmpty(_currentChannel.Topic))
+                {
+                    <span style="font-size:13px;color:var(--text-muted);margin-left:8px;border-left:1px solid var(--border-subtle);padding-left:12px;">
+                        @_currentChannel.Topic
+                    </span>
+                }
+                <div class="chat-header__actions">
+                    <button class="btn btn-ghost btn-icon" id="btn-members-toggle">👥</button>
+                    <button class="btn btn-ghost btn-icon" id="btn-search">🔍</button>
+                </div>
+            </div>
+
+            <!-- Mensagens -->
+            <div class="messages-area" id="messages-area">
+                @foreach (var msg in _messages)
+                {
+                    <div class="@(IsFirstMessageInGroup(msg) ? "message-group" : "message-continuation flex")"
+                         id="msg-@msg.Id">
+                        @if (IsFirstMessageInGroup(msg))
+                        {
+                            <div class="message-group__avatar">
+                                @if (!string.IsNullOrEmpty(msg.Sender?.AvatarUrl))
+                                {
+                                    <img src="@msg.Sender.AvatarUrl" alt="@msg.Sender.DisplayName" />
+                                }
+                                else
+                                {
+                                    @(msg.Sender?.DisplayName?.Substring(0, 1).ToUpper() ?? "?")
+                                }
+                            </div>
+                            <div class="message-group__content">
+                                <div class="message-group__meta">
+                                    <span class="message-group__author">@msg.Sender?.DisplayName</span>
+                                    <span class="message-group__time">@FormatTime(msg.SentAt)</span>
+                                </div>
+                                <MessageContent Message="msg" DecryptedText="@GetDecryptedText(msg)" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="message-time-hover">@msg.SentAt.ToString("HH:mm")</div>
+                            <MessageContent Message="msg" DecryptedText="@GetDecryptedText(msg)" />
+                        }
+                    </div>
+                }
+            </div>
+
+            <!-- Digitando... -->
+            <div class="typing-indicator">
+                @if (_typingUsers.Any())
+                {
+                    <div class="typing-dots">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                    <span>@string.Join(", ", _typingUsers.Values) @(_typingUsers.Count == 1 ? "está" : "estão") digitando...</span>
+                }
+            </div>
+
+            <!-- Input de Mensagem -->
+            <div class="message-input-area">
+                @if (_replyToMessage != null)
+                {
+                    <div class="message-input-reply">
+                        <div class="message-input-reply__bar"></div>
+                        <span>Respondendo a <strong>@_replyToMessage.Sender?.DisplayName</strong></span>
+                        <button class="btn btn-ghost btn-icon btn-sm" @onclick="ClearReply">✕</button>
+                    </div>
+                }
+
+                <div class="message-input-wrapper">
+                    <div class="message-input-main">
+                        <div class="message-input-actions">
+                            <!-- Upload de arquivo -->
+                            <label class="message-input-btn" for="file-input" data-tooltip="Enviar arquivo" id="btn-file-upload">
+                                📎
+                            </label>
+                            <InputFile id="file-input" style="display:none" OnChange="HandleFileUpload" />
+
+                            <!-- Gravar áudio -->
+                            <button class="message-input-btn @(_isRecording ? "recording" : "")"
+                                    @onclick="ToggleRecording"
+                                    data-tooltip="@(_isRecording ? "Parar gravação" : "Gravar áudio")"
+                                    id="btn-record-audio">
+                                🎙
+                            </button>
+                        </div>
+
+                        <textarea class="message-textarea"
+                                  id="message-input"
+                                  placeholder="Mensagem em #@_currentChannel.Name"
+                                  @bind="_messageText"
+                                  @bind:event="oninput"
+                                  @onkeydown="HandleKeyDown"
+                                  rows="1"></textarea>
+
+                        @if (_isRecording)
+                        {
+                            <div class="recording-indicator">
+                                <div class="recording-dot"></div>
+                                <span>@_recordingDuration</span>
+                            </div>
+                        }
+
+                        <button class="message-send-btn" @onclick="SendMessage"
+                                disabled="@(string.IsNullOrWhiteSpace(_messageText) && !_pendingAttachment.HasValue)"
+                                id="btn-send-message">
+                            ➤
+                        </button>
+                    </div>
+
+                    @if (_uploadProgress > 0 && _uploadProgress < 100)
+                    {
+                        <div class="upload-progress">
+                            <div style="font-size:13px;color:var(--text-muted)">Enviando @_uploadingFileName...</div>
+                            <div class="upload-progress__bar">
+                                <div class="upload-progress__fill" style="width:@_uploadProgress%"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            <!-- Tela de boas-vindas -->
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;color:var(--text-muted);">
+                <div style="font-size:64px;">💬</div>
+                <div style="font-size:22px;font-weight:700;color:var(--text-primary);">Bem-vindo ao Larrat</div>
+                <div style="font-size:14px;">Selecione um canal ou crie um grupo para começar.</div>
+                <button class="btn btn-primary" @onclick="ShowCreateGroup" id="btn-welcome-create-group">
+                    Criar meu primeiro grupo
+                </button>
+            </div>
+        }
+    </main>
+
+    <!-- Painel de Membros -->
+    @if (_currentGroup != null)
+    {
+        <aside class="members-panel">
+            @{
+                var onlineMembers = _currentGroup.Members.Where(m => m.User?.Status == UserStatus.Online).ToList();
+                var offlineMembers = _currentGroup.Members.Where(m => m.User?.Status != UserStatus.Online).ToList();
+            }
+
+            @if (onlineMembers.Any())
+            {
+                <div class="members-section__label">Online — @onlineMembers.Count</div>
+                @foreach (var member in onlineMembers)
+                {
+                    <div class="member-item" id="member-@member.UserId">
+                        <div class="member-avatar">
+                            @if (!string.IsNullOrEmpty(member.User?.AvatarUrl))
+                            {
+                                <img src="@member.User.AvatarUrl" alt="@member.User.DisplayName" />
+                            }
+                            else
+                            {
+                                @(member.User?.DisplayName?.Substring(0, 1).ToUpper() ?? "?")
+                            }
+                            <div class="member-status-dot online"></div>
+                        </div>
+                        <div>
+                            <div class="member-name">@member.User?.DisplayName</div>
+                            @if (member.Role != GroupRole.Member)
+                            {
+                                <div class="badge badge-yellow" style="font-size:10px">@member.Role</div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
+
+            @if (offlineMembers.Any())
+            {
+                <div class="members-section__label" style="margin-top:16px">Offline — @offlineMembers.Count</div>
+                @foreach (var member in offlineMembers)
+                {
+                    <div class="member-item" style="opacity:0.5" id="member-offline-@member.UserId">
+                        <div class="member-avatar">
+                            @(member.User?.DisplayName?.Substring(0, 1).ToUpper() ?? "?")
+                            <div class="member-status-dot offline"></div>
+                        </div>
+                        <div class="member-name">@member.User?.DisplayName</div>
+                    </div>
+                }
+            }
+        </aside>
+    }
+</div>
+
+<!-- Painel de voz ativo (fixo no fundo) -->
+@if (_activeVoiceRoomId.HasValue)
+{
+    <div class="voice-panel">
+        <div class="voice-panel__info">
+            <div class="voice-panel__room-name">
+                <span style="width:8px;height:8px;border-radius:50%;background:var(--online);display:inline-block;"></span>
+                @_activeVoiceRoomName — Conectado
+            </div>
+        </div>
+        <div class="voice-panel__controls">
+            <button class="voice-ctrl-btn @(_isMuted ? "muted" : "")" @onclick="ToggleMute" data-tooltip="@(_isMuted ? "Desmutar" : "Mutar")" id="btn-voice-mute">
+                @(_isMuted ? "🔇" : "🎤")
+            </button>
+            <button class="voice-ctrl-btn @(_isVideoOn ? "active" : "")" @onclick="ToggleVideo" data-tooltip="Câmera" id="btn-voice-video">
+                📹
+            </button>
+            <button class="voice-ctrl-btn" @onclick="ToggleScreenShare" data-tooltip="Compartilhar tela" id="btn-voice-screen">
+                🖥
+            </button>
+            <button class="voice-ctrl-btn" @onclick="ShowCreateSubRoom" data-tooltip="Criar sub-sala" id="btn-create-subroom">
+                ➕
+            </button>
+            <button class="voice-ctrl-btn disconnect" @onclick="LeaveVoiceRoom" data-tooltip="Desconectar" id="btn-voice-leave">
+                📵
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid? GroupId { get; set; }
+    [Parameter] public Guid? ChannelId { get; set; }
+
+    private List<Group> _userGroups = new();
+    private Group? _currentGroup;
+    private Channel? _currentChannel;
+    private List<Message> _messages = new();
+    private Dictionary<Guid, string> _decryptedMessages = new();
+
+    // Chat
+    private string _messageText = string.Empty;
+    private Message? _replyToMessage;
+    private Dictionary<string, string> _typingUsers = new(); // userId -> displayName
+    private Dictionary<Guid, int> _unreadCounts = new();
+
+    // Voice
+    private Guid? _activeVoiceRoomId;
+    private string _activeVoiceRoomName = string.Empty;
+    private bool _isMuted;
+    private bool _isVideoOn;
+    private HashSet<string> _speakingUsers = new();
+
+    // Audio Record
+    private bool _isRecording;
+    private string _recordingDuration = "0:00";
+    private System.Timers.Timer? _recordingTimer;
+    private int _recordingSeconds;
+
+    // Upload
+    private Guid? _pendingAttachment;
+    private int _uploadProgress;
+    private string _uploadingFileName = string.Empty;
+
+    // Auth
+    private string _currentUserId = string.Empty;
+    private string _currentUserName = string.Empty;
+    private string _currentUserInitial = "?";
+    private bool _isGroupAdmin;
+
+    // SignalR
+    private HubConnection? _chatHub;
+    private HubConnection? _voiceHub;
+
+    // Crypto key para o canal atual
+    private string? _currentChannelKey;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAuthState();
+        _userGroups = await GroupService.GetUserGroupsAsync(_currentUserId);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (GroupId.HasValue)
+        {
+            _currentGroup = await GroupService.GetGroupWithDetailsAsync(GroupId.Value);
+            _isGroupAdmin = _currentGroup?.Members
+                .Any(m => m.UserId == _currentUserId && m.Role != GroupRole.Member) ?? false;
+        }
+        else
+        {
+            _currentGroup = null;
+        }
+
+        if (ChannelId.HasValue && _currentGroup != null)
+        {
+            _currentChannel = _currentGroup.Channels.FirstOrDefault(c => c.Id == ChannelId);
+            if (_currentChannel != null)
+            {
+                await LoadChannelMessages();
+                await ConnectToChat();
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("LarratInterop.scrollToBottom", "messages-area");
+        }
+    }
+
+    private async Task LoadChannelMessages()
+    {
+        if (!ChannelId.HasValue) return;
+
+        // Deriva chave de criptografia para este canal
+        var jwtSecret = Configuration["JwtSettings:SecretKey"] ?? "";
+        _currentChannelKey = EncryptionService.DeriveConversationKey(jwtSecret, ChannelId.Value.ToString());
+
+        _messages = await MessageService.GetChannelMessagesAsync(ChannelId.Value);
+
+        // Descriptografa mensagens carregadas
+        foreach (var msg in _messages)
+            TryDecryptMessage(msg);
+    }
+
+    private void TryDecryptMessage(Message msg)
+    {
+        if (msg.IsDeleted || string.IsNullOrEmpty(msg.EncryptedContent) || _currentChannelKey == null) return;
+        try
+        {
+            var payload = new Larrat.Core.Services.EncryptedPayload
+            {
+                CipherText = msg.EncryptedContent,
+                IV = msg.IV ?? "",
+                AuthTag = msg.AuthTag ?? ""
+            };
+            _decryptedMessages[msg.Id] = EncryptionService.Decrypt(payload, _currentChannelKey);
+        }
+        catch { _decryptedMessages[msg.Id] = "[Mensagem não pôde ser descriptografada]"; }
+    }
+
+    private string GetDecryptedText(Message msg)
+    {
+        if (msg.IsDeleted) return "Esta mensagem foi apagada.";
+        return _decryptedMessages.TryGetValue(msg.Id, out var text) ? text : "...";
+    }
+
+    private async Task ConnectToChat()
+    {
+        if (_chatHub?.State == HubConnectionState.Connected) return;
+
+        var token = await JS.InvokeAsync<string>("localStorage.getItem", "larrat_token");
+        if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login"); return; }
+
+        _chatHub = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/chat"), options =>
+            {
+                options.AccessTokenProvider = () => Task.FromResult<string?>(token);
+            })
+            .WithAutomaticReconnect()
+            .Build();
+
+        _chatHub.On<object>("ReceiveChannelMessage", async (msgObj) =>
+        {
+            // Em produção: deserializar e descriptografar no cliente
+            await LoadChannelMessages();
+            await InvokeAsync(StateHasChanged);
+            await JS.InvokeVoidAsync("LarratInterop.scrollToBottom", "messages-area");
+        });
+
+        _chatHub.On<string, string, bool>("UserTyping", (channelId, userId, isTyping) =>
+        {
+            if (channelId != ChannelId?.ToString()) return;
+            if (isTyping) _typingUsers[userId] = userId;
+            else _typingUsers.Remove(userId);
+            InvokeAsync(StateHasChanged);
+        });
+
+        _chatHub.On<string, string>("UserStatusChanged", (userId, status) =>
+        {
+            var member = _currentGroup?.Members.FirstOrDefault(m => m.UserId == userId);
+            if (member?.User != null)
+            {
+                member.User.Status = Enum.TryParse<UserStatus>(status, out var s) ? s : UserStatus.Offline;
+                InvokeAsync(StateHasChanged);
+            }
+        });
+
+        await _chatHub.StartAsync();
+        await _chatHub.InvokeAsync("JoinChannel", ChannelId?.ToString());
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_messageText) && !_pendingAttachment.HasValue) return;
+        if (_chatHub?.State != HubConnectionState.Connected) return;
+        if (_currentChannelKey == null) return;
+
+        var text = _messageText.Trim();
+        _messageText = string.Empty;
+
+        // Criptografa no servidor (idealmente seria criptografado no cliente via JS antes de enviar)
+        var encrypted = EncryptionService.Encrypt(text, _currentChannelKey);
+
+        await _chatHub.InvokeAsync("SendChannelMessage",
+            ChannelId?.ToString(),
+            encrypted.CipherText,
+            encrypted.IV,
+            encrypted.AuthTag,
+            "Text",
+            _pendingAttachment?.ToString(),
+            _replyToMessage?.Id.ToString());
+
+        _pendingAttachment = null;
+        _replyToMessage = null;
+        await JS.InvokeVoidAsync("LarratInterop.scrollToBottom", "messages-area");
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendMessage();
+        }
+        else
+        {
+            // Notifica digitando
+            if (_chatHub?.State == HubConnectionState.Connected)
+                await _chatHub.InvokeAsync("SendTyping", ChannelId?.ToString(), true);
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file.Size > 150L * 1024 * 1024)
+        {
+            // TODO: mostrar erro
+            return;
+        }
+
+        _uploadingFileName = file.Name;
+        _uploadProgress = 10;
+        StateHasChanged();
+
+        // Upload via HTTP multipart
+        using var content = new MultipartFormDataContent();
+        var stream = file.OpenReadStream(150L * 1024 * 1024);
+        content.Add(new StreamContent(stream), "file", file.Name);
+
+        var token = await JS.InvokeAsync<string>("localStorage.getItem", "larrat_token");
+        using var client = new HttpClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        _uploadProgress = 50;
+        StateHasChanged();
+
+        var response = await client.PostAsync($"{Nav.BaseUri}api/files/upload", content);
+        if (response.IsSuccessStatusCode)
+        {
+            var result = await response.Content.ReadFromJsonAsync<UploadResult>();
+            _pendingAttachment = result?.Id;
+            _uploadProgress = 100;
+        }
+
+        _uploadProgress = 0;
+        StateHasChanged();
+    }
+
+    private async Task ToggleRecording()
+    {
+        if (!_isRecording)
+        {
+            _isRecording = true;
+            _recordingSeconds = 0;
+            await JS.InvokeVoidAsync("LarratInterop.startRecording");
+
+            _recordingTimer = new System.Timers.Timer(1000);
+            _recordingTimer.Elapsed += (s, e) =>
+            {
+                _recordingSeconds++;
+                _recordingDuration = $"{_recordingSeconds / 60}:{_recordingSeconds % 60:D2}";
+                InvokeAsync(StateHasChanged);
+            };
+            _recordingTimer.Start();
+        }
+        else
+        {
+            _isRecording = false;
+            _recordingTimer?.Stop();
+            _recordingTimer?.Dispose();
+            // TODO: obter blob e fazer upload como áudio
+            await JS.InvokeVoidAsync("LarratInterop.stopRecording");
+        }
+    }
+
+    private async Task JoinVoiceRoom(Guid roomId)
+    {
+        _activeVoiceRoomId = roomId;
+        _activeVoiceRoomName = _currentGroup?.VoiceRooms.FirstOrDefault(v => v.Id == roomId)?.Name ?? "";
+
+        var token = await JS.InvokeAsync<string>("localStorage.getItem", "larrat_token");
+        _voiceHub = new HubConnectionBuilder()
+            .WithUrl(Nav.ToAbsoluteUri("/hubs/voice"), opt =>
+                opt.AccessTokenProvider = () => Task.FromResult<string?>(token))
+            .WithAutomaticReconnect()
+            .Build();
+
+        await _voiceHub.StartAsync();
+        await JS.InvokeVoidAsync("LarratInterop.initWebRTC", _voiceHub);
+        await JS.InvokeVoidAsync("LarratInterop.joinVoiceRoom", roomId.ToString(), false);
+
+        StateHasChanged();
+    }
+
+    private async Task LeaveVoiceRoom()
+    {
+        if (_activeVoiceRoomId.HasValue)
+        {
+            await JS.InvokeVoidAsync("LarratInterop.leaveVoiceRoom");
+            if (_voiceHub != null) await _voiceHub.StopAsync();
+        }
+        _activeVoiceRoomId = null;
+        _isMuted = false;
+        _isVideoOn = false;
+        StateHasChanged();
+    }
+
+    private async Task ToggleMute()
+    {
+        _isMuted = !_isMuted;
+        await JS.InvokeVoidAsync("LarratInterop.toggleMute");
+    }
+
+    private async Task ToggleVideo()
+    {
+        _isVideoOn = !_isVideoOn;
+        await JS.InvokeVoidAsync("LarratInterop.toggleVideo");
+    }
+
+    private async Task ToggleScreenShare()
+    {
+        await JS.InvokeVoidAsync("LarratInterop.startScreenShare");
+    }
+
+    private void ClearReply() => _replyToMessage = null;
+
+    private bool IsFirstMessageInGroup(Message msg)
+    {
+        var idx = _messages.IndexOf(msg);
+        if (idx == 0) return true;
+        var prev = _messages[idx - 1];
+        return prev.SenderId != msg.SenderId ||
+               (msg.SentAt - prev.SentAt).TotalMinutes > 5;
+    }
+
+    private string FormatTime(DateTime dt)
+    {
+        var now = DateTime.UtcNow;
+        if (dt.Date == now.Date) return $"Hoje às {dt.ToLocalTime():HH:mm}";
+        if (dt.Date == now.Date.AddDays(-1)) return $"Ontem às {dt.ToLocalTime():HH:mm}";
+        return dt.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+    }
+
+    private async Task LoadAuthState()
+    {
+        // Em produção: usar AuthenticationStateProvider para obter claims do JWT
+        var token = await JS.InvokeAsync<string>("localStorage.getItem", "larrat_token");
+        if (string.IsNullOrEmpty(token)) { Nav.NavigateTo("/login"); return; }
+
+        var handler = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler();
+        var jwt = handler.ReadJwtToken(token);
+        _currentUserId = jwt.Claims.FirstOrDefault(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _currentUserName = jwt.Claims.FirstOrDefault(c => c.Type == "displayName")?.Value ?? "Usuário";
+        _currentUserInitial = _currentUserName.Substring(0, 1).ToUpper();
+    }
+
+    private async Task Logout()
+    {
+        await JS.InvokeVoidAsync("localStorage.removeItem", "larrat_token");
+        await JS.InvokeVoidAsync("localStorage.removeItem", "larrat_refresh");
+        Nav.NavigateTo("/login", forceLoad: true);
+    }
+
+    // Stubs para modais (a implementar)
+    private void ShowCreateGroup() { }
+    private void ShowGroupSettings() { }
+    private void ShowAddChannel() { }
+    private void ShowAddVoiceRoom() { }
+    private void ShowCreateSubRoom() { }
+
+    private class UploadResult { public Guid Id { get; set; } }
+}

@@ -1,0 +1,143 @@
+@page "/register"
+@using Larrat.Core.Entities
+@using Larrat.Core.Services
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> UserManager
+@inject ITokenService TokenService
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Criar Conta — Larrat</PageTitle>
+
+<div class="auth-page">
+    <div class="auth-bg-effect"></div>
+
+    <div class="auth-card">
+        <div class="auth-logo">
+            <div class="auth-logo__mark">L</div>
+            <div class="auth-logo__text">Larrat<span>.</span></div>
+        </div>
+
+        <h1 style="font-size:22px;font-weight:800;margin-bottom:4px;">Criar sua conta</h1>
+        <p style="color:var(--text-muted);font-size:14px;margin-bottom:24px;">Junte-se ao Larrat. É grátis.</p>
+
+        @if (_errors.Count > 0)
+        {
+            <div class="toast" style="margin-bottom:16px;position:relative;top:auto;right:auto;animation:none;flex-direction:column;align-items:flex-start;gap:4px;">
+                @foreach (var error in _errors)
+                {
+                    <div>⚠️ @error</div>
+                }
+            </div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="HandleRegister" FormName="register">
+            <DataAnnotationsValidator />
+
+            <div class="form-group">
+                <label class="form-label" for="reg-name">Nome de exibição</label>
+                <InputText id="reg-name" class="form-input" @bind-Value="_model.DisplayName"
+                           placeholder="Seu nome" autocomplete="name" />
+                <ValidationMessage For="() => _model.DisplayName" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="reg-email">E-mail</label>
+                <InputText id="reg-email" class="form-input" @bind-Value="_model.Email"
+                           placeholder="seu@email.com" type="email" autocomplete="email" />
+                <ValidationMessage For="() => _model.Email" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="reg-username">Nome de usuário</label>
+                <InputText id="reg-username" class="form-input" @bind-Value="_model.UserName"
+                           placeholder="nome_usuario" autocomplete="username" />
+                <ValidationMessage For="() => _model.UserName" />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="reg-password">Senha</label>
+                <InputText id="reg-password" class="form-input" @bind-Value="_model.Password"
+                           placeholder="Mínimo 8 caracteres" type="password" autocomplete="new-password" />
+                <ValidationMessage For="() => _model.Password" />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top:8px" disabled="@_isLoading">
+                @(_isLoading ? "Criando conta..." : "Criar conta")
+            </button>
+        </EditForm>
+
+        <div style="text-align:center;margin-top:24px;color:var(--text-muted);font-size:14px;">
+            Já tem conta?
+            <a href="/login" style="color:var(--yellow-500);font-weight:600;text-decoration:none;">
+                Entrar
+            </a>
+        </div>
+    </div>
+</div>
+
+@code {
+    private RegisterModel _model = new();
+    private List<string> _errors = new();
+    private bool _isLoading;
+
+    private async Task HandleRegister()
+    {
+        _isLoading = true;
+        _errors.Clear();
+
+        try
+        {
+            var user = new ApplicationUser
+            {
+                UserName = _model.UserName,
+                Email = _model.Email,
+                DisplayName = _model.DisplayName,
+                Status = UserStatus.Online
+            };
+
+            var result = await UserManager.CreateAsync(user, _model.Password);
+            if (!result.Succeeded)
+            {
+                _errors = result.Errors.Select(e => e.Description).ToList();
+                return;
+            }
+
+            await UserManager.AddToRoleAsync(user, "User");
+
+            var roles = await UserManager.GetRolesAsync(user);
+            var token = TokenService.GenerateAccessToken(user, roles);
+            var refreshToken = TokenService.GenerateRefreshToken();
+
+            await JS.InvokeVoidAsync("localStorage.setItem", "larrat_token", token);
+            await JS.InvokeVoidAsync("localStorage.setItem", "larrat_refresh", refreshToken);
+
+            Nav.NavigateTo("/", forceLoad: true);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private class RegisterModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 2)]
+        public string DisplayName { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.EmailAddress]
+        public string Email { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.StringLength(50, MinimumLength = 3)]
+        [System.ComponentModel.DataAnnotations.RegularExpression(@"^[a-zA-Z0-9_]+$", ErrorMessage = "Use apenas letras, números e underscore.")]
+        public string UserName { get; set; } = string.Empty;
+
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 8)]
+        public string Password { get; set; } = string.Empty;
+    }
+}
