@@ -68,7 +68,7 @@ Edite `src/Larrat.Web/appsettings.json`:
 ### 3. Execute as migrations
 
 ```powershell
-cd d:\Projetos2\Larrat
+cd x:/.../Larrat
 dotnet ef database update --project src/Larrat.Core --startup-project src/Larrat.Web
 ```
 
