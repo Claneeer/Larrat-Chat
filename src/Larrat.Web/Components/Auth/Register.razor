@@ -59,7 +59,7 @@
             <div class="form-group">
                 <label class="form-label" for="reg-password">Senha</label>
                 <InputText id="reg-password" class="form-input" @bind-Value="_model.Password"
-                           placeholder="Mínimo 8 caracteres" type="password" autocomplete="new-password" />
+                           placeholder="Mínimo 6 caracteres" type="password" autocomplete="new-password" />
                 <ValidationMessage For="() => _model.Password" />
             </div>
 
@@ -137,7 +137,7 @@
         public string UserName { get; set; } = string.Empty;
 
         [System.ComponentModel.DataAnnotations.Required]
-        [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 8)]
+        [System.ComponentModel.DataAnnotations.StringLength(100, MinimumLength = 6)]
         public string Password { get; set; } = string.Empty;
     }
 }

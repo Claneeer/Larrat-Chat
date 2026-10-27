@@ -1,156 +1,128 @@
-# Larrat Chat 🟡⚫
+# Larrat Chat
 
-> Chat em tempo real com criptografia de ponta a ponta, chamadas de voz/vídeo estilo Discord, grupos com sub-salas, envio de arquivos até 150MB e gravação de áudio.
+Larrat Chat é uma plataforma de comunicação distribuída em tempo real, projetada para troca de mensagens criptografadas, canais de voz WebRTC, compartilhamento de arquivos e organização por grupos e canais. A solução combina ASP.NET Core, Blazor, SignalR e Entity Framework Core para oferecer uma experiência de chat moderna, segura e colaborativa.
 
-![Design: 70% preto / 20% amarelo / 10% branco](https://via.placeholder.com/800x100/0D0D0D/F5C518?text=Larrat+%E2%80%94+70%25+Preto+%7C+20%25+Amarelo+%7C+10%25+Branco)
+## Visão geral
 
-## Stack Tecnológico
+A plataforma foi concebida para manter a comunicação em tempo real com alta disponibilidade e baixa fricção operacional. Os usuários podem trocar mensagens em canais dedicados, participar de grupos, consumir arquivos e criar salas de voz para reuniões rápidas ou conversas em equipe.
 
-| Componente       | Tecnologia                          |
-|-----------------|-------------------------------------|
-| Backend          | ASP.NET Core 8 (Blazor Server)     |
-| Banco de Dados   | PostgreSQL + EF Core 8             |
-| Tempo Real       | SignalR (mensagens) + WebRTC (voz) |
-| Autenticação     | JWT + Refresh Token                 |
-| Criptografia     | AES-256-GCM + HKDF                 |
-| Upload           | Streaming até 150MB                 |
+Entre os principais diferenciais estão:
 
-## Funcionalidades
+- Mensagens de texto com criptografia aplicada antes do armazenamento
+- Canais de texto e salas de voz organizados por grupo
+- Arquivos enviados por usuários com controle de tamanho e persistência
+- Autenticação com Identity + JWT
+- WebRTC para voz e vídeo em tempo real
+- Estrutura modular com separação clara entre domínio e apresentação
 
-- ✅ **Chat em tempo real** via SignalR
-- ✅ **Criptografia E2E** — AES-256-GCM (chaves derivadas via HKDF do JWT secret)
-- ✅ **Chamadas de voz/vídeo** — WebRTC peer-to-peer (mesh topology)
-- ✅ **Sub-grupos de voz** — criados dinamicamente dentro de salas (como Discord)
-- ✅ **Grupos** com canais de texto e salas de voz
-- ✅ **Gravação de áudio** in-app (MediaRecorder API)
-- ✅ **Upload de arquivos** até 150MB com SHA-256 para integridade
-- ✅ **Indicador de digitando**, reações a mensagens, resposta a mensagens
-- ✅ **Compartilhamento de tela** via WebRTC
-- ✅ **Detecção de voz ativa** (VAD)
-- ✅ **Convite por código** para grupos
-- ✅ **Status de usuário** (Online, Away, DND, Offline)
-- ✅ **Design 70/20/10** — Preto / Amarelo Larrat (#F5C518) / Branco
+## Arquitetura e tecnologias
 
-## Pré-requisitos
+### Back-end e Core
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8)
-- [PostgreSQL 15+](https://www.postgresql.org/download/)
-- Node.js (opcional, para produção)
+O projeto principal do domínio está em `src/Larrat.Core`, onde ficam:
 
-## Setup Rápido
+- Entidades do sistema: usuários, grupos, canais, mensagens, arquivos e salas de voz
+- `LarratDbContext` e migrações do Entity Framework Core
+- Serviços de criptografia (`EncryptionService`)
+- Serviços de gerenciamento de autenticação e JWT (`TokenService`)
+- Serviços de grupo, mensagem e arquivos (`GroupService`, `MessageService`, `FileService`)
 
-### 1. Configure o banco de dados
+Esses componentes são responsáveis por persistência, regras de negócio e proteção de dados sensíveis.
 
-```sql
--- No PostgreSQL (psql ou pgAdmin):
-CREATE DATABASE larrat_chat;
+### Web e real-time
+
+A camada web fica em `src/Larrat.Web` e inclui:
+
+- ASP.NET Core com aplicação Blazor
+- Componentes Razor para autenticação e chat
+- SignalR para comunicação em tempo real (`ChatHub` e `VoiceHub`)
+- WebRTC para voz/vídeo (`wwwroot/js/webrtc.js` e `wwwroot/js/audio-recorder.js`)
+- Controle de upload e APIs REST para arquivos
+
+## Estrutura da solução
+
+```text
+Larrat-Chat/
+├── README.md
+├── Larrat.slnx
+├── src/
+│   ├── Larrat.Core/
+│   │   ├── Data/
+│   │   ├── Entities/
+│   │   └── Services/
+│   └── Larrat.Web/
+│       ├── Components/
+│       ├── Controllers/
+│       ├── Hubs/
+│       ├── wwwroot/
+│       ├── Program.cs
+│       ├── appsettings.json
+│       ├── appsettings.Development.json
+│       └── appsettings.example.json
+└── ...
 ```
 
-### 2. Configure `appsettings.json`
+## Pré-requisitos e ambiente
 
-Edite `src/Larrat.Web/appsettings.json`:
+Antes de executar o projeto, confirme que o ambiente atende aos requisitos abaixo:
+
+- .NET 8 SDK
+- PostgreSQL disponível localmente ou via container
+- Git para controle de versão do repositório
+
+### Configuração do banco
+
+O banco padrão do projeto é:
+
+- `larrat-Chat`
+
+A connection string esperada é semelhante a:
 
 ```json
 {
   "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=larrat_chat;Username=postgres;Password=SUA_SENHA"
+    "DefaultConnection": "Host=localhost;Port=5432;Database=larrat-Chat;Username=postgres;Password=postgres"
   },
   "JwtSettings": {
-    "SecretKey": "MUDE_ISSO_EM_PRODUCAO_MINIMO_32_CARACTERES!",
-    "Issuer": "https://larrat.app",
-    "Audience": "https://larrat.app"
+    "SecretKey": "LarratDevSecretKey_32_chars_1234567890",
+    "Issuer": "LarratChat",
+    "Audience": "LarratChat"
   }
 }
 ```
 
-> ⚠️ **Importante**: Mude o `SecretKey` para uma string aleatória forte em produção. Esta chave é usada para derivar as chaves de criptografia AES-256.
+> Em desenvolvimento, os valores acima já estão preparados para funcionar. Em produção, substitua a secret key por um valor forte e exclusivo.
 
-### 3. Execute as migrations
+## Como executar
 
-```powershell
-cd x:/.../Larrat
-dotnet ef database update --project src/Larrat.Core --startup-project src/Larrat.Web
+No diretório raiz do repositório, execute:
+
+```bash
+dotnet restore
+dotnet build Larrat.slnx
 ```
 
-### 4. Rode o projeto
+Para rodar a aplicação:
 
-```powershell
-cd src/Larrat.Web
-dotnet run
+```bash
+dotnet run --project src/Larrat.Web
 ```
 
-Acesse: **https://localhost:7xxx** (a porta será exibida no terminal)
+Ao iniciar, a aplicação realiza automaticamente:
 
-## Arquitetura de Criptografia
+1. Criação do banco `larrat-Chat` quando necessário
+2. Aplicação das migrações do Entity Framework Core
+3. Seed de usuários de teste e grupo padrão
 
-```
-JWT Secret Key (master)
-       │
-       ▼ HKDF-SHA256 (info = "larrat-chat-{conversationId}")
-Conversation Key (256-bit AES)
-       │
-       ▼ AES-256-GCM
-EncryptedContent + IV (12B) + AuthTag (16B)
-       │
-       ▼ Armazenado no PostgreSQL (mensagens nunca em plaintext)
-```
+## Contas de teste pré-configuradas
 
-A chave mestre nunca sai do servidor. Cada canal/conversa tem sua própria chave derivada via HKDF. A tag de autenticação GCM garante integridade — qualquer adulteração é detectada.
+A inicialização automática do banco já cria duas contas prontas para uso:
 
-## Arquitetura de Voz (WebRTC)
+| Conta | E-mail | Senha |
+| :--- | :--- | :--- |
+| **Usuário Teste 1** | `Larrat@example.com` | `senha123` |
+| **Usuário Teste 2** | `example@larrat.com` | `senha321` |
 
-```
-Usuário A ──── ICE/SDP via SignalR VoiceHub ──── Usuário B
-     │                                                │
-     └──────── WebRTC P2P (áudio/vídeo direto) ──────┘
-                         (sem passar pelo servidor)
-```
+## Observações
 
-Para grupos maiores, usa mesh topology (cada participante conecta a todos os outros). Para grupos muito grandes, pode ser migrado para SFU (ex: mediasoup).
-
-## Estrutura do Projeto
-
-```
-src/
-├── Larrat.Core/              # Domínio e infraestrutura
-│   ├── Entities/             # Entidades EF Core
-│   ├── Data/                 # DbContext + Migrations
-│   └── Services/             # Lógica de negócio
-└── Larrat.Web/               # Blazor Server + SignalR
-    ├── Components/           # Componentes Razor
-    ├── Controllers/          # API (upload de arquivos)
-    ├── Hubs/                 # ChatHub + VoiceHub
-    └── wwwroot/
-        ├── css/larrat.css    # Design system completo
-        └── js/               # WebRTC + Audio + Crypto
-```
-
-## Configuração para Produção
-
-1. **TURN Server** — Para WebRTC funcionar em redes NAT restritivas, configure um servidor TURN (ex: [coturn](https://github.com/coturn/coturn)):
-   ```json
-   // Em appsettings.json:
-   "WebRTC": {
-     "TurnServer": "turn:seu-servidor.com:3478",
-     "TurnUsername": "user",
-     "TurnCredential": "password"
-   }
-   ```
-
-2. **Redis** — Para múltiplos servidores, substitua o `Dictionary<>` em memória dos Hubs por backplane Redis:
-   ```bash
-   dotnet add package Microsoft.AspNetCore.SignalR.StackExchangeRedis
-   ```
-
-3. **Storage** — Para produção, mova os uploads para Azure Blob Storage ou S3.
-
-4. **SSL** — Obrigatório para WebRTC e câmera/microfone.
-
-## Convite para Grupos
-
-Cada grupo tem um código de convite único (8 caracteres alfanuméricos).
-Compartilhe o link: `https://larrat.app/invite/ABCD1234`
-
-## Licença
-
-Propriedade de Larrat. Todos os direitos reservados.
+O projeto foi preparado para que a autenticação e o chat funcionem diretamente em ambiente local sem etapas manuais adicionais, com migrações e dados iniciais sendo executados no startup da aplicação.

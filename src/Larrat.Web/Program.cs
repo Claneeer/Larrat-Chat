@@ -12,16 +12,21 @@ using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
 
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection não foi configurada.");
+
 // ─── Banco de Dados ─────────────────────────────────────
 builder.Services.AddDbContext<LarratDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseNpgsql(connectionString));
 
 // ─── Identity ────────────────────────────────────────────
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
-    options.Password.RequiredLength = 8;
-    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireDigit = true;
+    options.Password.RequireLowercase = true;
     options.Password.RequireUppercase = false;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequiredLength = 6;
     options.User.RequireUniqueEmail = true;
     options.SignIn.RequireConfirmedEmail = false;
 })
@@ -30,7 +35,7 @@ builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 
 // ─── JWT ─────────────────────────────────────────────────
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = jwtSettings["SecretKey"]!;
+var secretKey = jwtSettings["SecretKey"] ?? "LarratDevSecretKey_32_chars_1234567890";
 
 builder.Services.AddAuthentication(options =>
 {
@@ -44,14 +49,13 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
         ValidateIssuer = true,
-        ValidIssuer = jwtSettings["Issuer"],
+        ValidIssuer = jwtSettings["Issuer"] ?? "LarratChat",
         ValidateAudience = true,
-        ValidAudience = jwtSettings["Audience"],
+        ValidAudience = jwtSettings["Audience"] ?? "LarratChat",
         ValidateLifetime = true,
         ClockSkew = TimeSpan.FromSeconds(30)
     };
 
-    // Suporte JWT via query string para SignalR (WebSocket não passa headers)
     options.Events = new JwtBearerEvents
     {
         OnMessageReceived = context =>
@@ -73,18 +77,19 @@ builder.Services.AddAuthorization();
 // ─── SignalR ──────────────────────────────────────────────
 builder.Services.AddSignalR(options =>
 {
-    options.MaximumReceiveMessageSize = 1024 * 1024; // 1MB por mensagem SignalR
+    options.MaximumReceiveMessageSize = 1024 * 1024;
 });
 
 // ─── Upload de Arquivos Grandes (150MB) ──────────────────
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
 {
-    options.MultipartBodyLengthLimit = 150L * 1024 * 1024; // 150MB
+    options.MultipartBodyLengthLimit = 150L * 1024 * 1024;
     options.ValueLengthLimit = int.MaxValue;
 });
+
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
-    serverOptions.Limits.MaxRequestBodySize = 150L * 1024 * 1024; // 150MB
+    serverOptions.Limits.MaxRequestBodySize = 150L * 1024 * 1024;
 });
 
 // ─── Controllers (para upload de arquivos via API) ────────
@@ -106,12 +111,9 @@ builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
 
-// ─── Migrations automáticas em desenvolvimento ────────────
-if (app.Environment.IsDevelopment())
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
-    var db = scope.ServiceProvider.GetRequiredService<LarratDbContext>();
-    await db.Database.MigrateAsync();
+    await DbInitializer.InitializeAsync(scope.ServiceProvider);
 }
 
 // ─── Pipeline HTTP ────────────────────────────────────────
@@ -130,7 +132,6 @@ app.UseAntiforgery();
 
 // ─── Endpoints ────────────────────────────────────────────
 app.MapControllers();
-
 app.MapHub<ChatHub>("/hubs/chat");
 app.MapHub<VoiceHub>("/hubs/voice");
 

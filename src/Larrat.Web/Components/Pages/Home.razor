@@ -427,10 +427,9 @@
     // Crypto key para o canal atual
     private string? _currentChannelKey;
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
-        await LoadAuthState();
-        _userGroups = await GroupService.GetUserGroupsAsync(_currentUserId);
+        return Task.CompletedTask;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -452,7 +451,6 @@
             if (_currentChannel != null)
             {
                 await LoadChannelMessages();
-                await ConnectToChat();
             }
         }
     }
@@ -461,7 +459,21 @@
     {
         if (firstRender)
         {
+            await LoadAuthState();
+
+            if (!string.IsNullOrEmpty(_currentUserId))
+            {
+                _userGroups = await GroupService.GetUserGroupsAsync(_currentUserId);
+                StateHasChanged();
+            }
+
             await JS.InvokeVoidAsync("LarratInterop.scrollToBottom", "messages-area");
+        }
+
+        if (ChannelId.HasValue && _currentGroup != null && _currentChannel != null &&
+            !string.IsNullOrEmpty(_currentUserId) && _chatHub is null)
+        {
+            await ConnectToChat();
         }
     }
 
